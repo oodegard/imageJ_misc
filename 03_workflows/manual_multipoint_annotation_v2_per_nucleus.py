@@ -49,6 +49,7 @@ def run():
 # This function will open one image and call manual_annotate_4D or editTrace as long as there are ROIs in the ROI manager
 # The function will save each ROI output_dir with the same file name + track ID + .zip  
 def processImage(image_path, output_dir):
+	print("Run analysis: " + image_path)
 	# Define output name
 	outNameBase = os.path.splitext(os.path.basename(str(image_path)))[0]
 	print outNameBase
@@ -76,10 +77,12 @@ def processImage(image_path, output_dir):
 
 		if(not os.path.exists(segmentation_file_name)):
 			# Fin all nuclei
-			
-	
-			
+
 			nuc = Duplicator().run(imp, nuc_ch, nuc_ch, 1, 1, 1, 1)
+			
+			
+			
+			
 			IJ.run(nuc, "Convert to Mask", "Intermodes dark")
 	
 			# Delete all ROIs in ROI manager
