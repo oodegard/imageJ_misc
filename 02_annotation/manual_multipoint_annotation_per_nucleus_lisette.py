@@ -6,8 +6,11 @@ from loci.plugins import BF
 import os
 import sys
 import shutil
-from ijmisc_oof import get1DMaxima
-
+#from ijmisc_oof import get1DMaxima
+import glob
+from ij.measure import ResultsTable
+from ij.text import TextWindow
+	
 
 #@ File    (label = "Input directory", style = "directory") srcfile
 ## File    (label = "Output directory", style = "directory") dstfile
@@ -23,10 +26,10 @@ keepDirectories = False
 
 ## Lists all files in folder
 ## Runs files with correct extension and containstring
-def run():
+def run(output_folder_ext, nuc_seg_ext, nucleus_annotation_ext):
 	srcDir = srcfile.getAbsolutePath()
 	#dstDir = dstfile.getAbsolutePath()
-	dstDir = srcDir + "_annotation"
+	dstDir = srcDir + output_folder_ext
 	if srcDir == dstDir:
 		sys.exit("srcDir == dstDir is not allowed")
 	
@@ -45,6 +48,8 @@ def run():
 			continue
 		# Process image
 		processImage(os.path.join(srcDir, filename), dstDir)
+	
+	makeResultsTable(dstDir)
 
 # This function will open one image and call manual_annotate_4D or editTrace as long as there are ROIs in the ROI manager
 # The function will save each ROI output_dir with the same file name + track ID + .zip  
@@ -52,8 +57,7 @@ def processImage(image_path, output_dir):
 	print("Run analysis: " + image_path)
 	# Define output name
 	outNameBase = os.path.splitext(os.path.basename(str(image_path)))[0]
-	print outNameBase
-		
+
 	# Open image
 	imps = BF.openImagePlus(str(image_path))
 	
@@ -61,8 +65,7 @@ def processImage(image_path, output_dir):
 	for imp in imps:
 		IJ.run(imp, "Enhance Contrast", "saturated=0.01")
 		IJ.run(imp, "8-bit", "")
-		
-		
+			
 		# Make/empty ROI manager
 		rm = RoiManager.getInstance()
 		if(rm.getCount()>0):
@@ -73,16 +76,11 @@ def processImage(image_path, output_dir):
 		if(imp.getDimensions()[3]>1):
   			imp = ZProjector.run(imp,"max all")
 
-		segmentation_file_name = os.path.join(output_dir, outNameBase + "_nuc_seg.zip")
-
+		segmentation_file_name = os.path.join(output_dir, outNameBase + nuc_seg_ext + ".zip")
+		
 		if(not os.path.exists(segmentation_file_name)):
 			# Fin all nuclei
-
 			nuc = Duplicator().run(imp, nuc_ch, nuc_ch, 1, 1, 1, 1)
-			
-			
-			
-			
 			IJ.run(nuc, "Convert to Mask", "Intermodes dark")
 	
 			# Delete all ROIs in ROI manager
@@ -92,7 +90,7 @@ def processImage(image_path, output_dir):
 			
 			# Find nuclei and add to manager
 			IJ.run(nuc, "Analyze Particles...", "size=100-Infinity exclude clear add");
-		
+
 			# Save nucleus segmentation
 			rm.runCommand(imp,"Deselect");
 			rm.save(segmentation_file_name);
@@ -101,13 +99,11 @@ def processImage(image_path, output_dir):
 			rm.open(segmentation_file_name)
 		
 		imp.setDisplayMode(IJ.COMPOSITE);
-		imp.show()
+		imp.show() # To activate composite img
 		imp.hide()
 
 		if(rm.getCount()>0):
-			for i, r in enumerate(rm):
-				print r, i
-				
+			for i, r in enumerate(rm): # For each nucleus	
 				imp_flat = imp.flatten()
 				imp_flat.show()
 				rm.select(i)
@@ -119,10 +115,9 @@ def processImage(image_path, output_dir):
 				if(rm.getCount()>0):
 					rm.runCommand(imp,"Deselect")
 					rm.runCommand(imp,"Delete")
-
 				
 				# Let the user define new trace, or open existing trace 
-				outName = os.path.join(output_dir, outNameBase + "_nucleus_annotation_" + str(i) + ".zip")	 
+				outName = os.path.join(output_dir, outNameBase + nucleus_annotation_ext + str(i) + ".zip")	 
 				if(not os.path.exists(outName)):			
 					rm = manual_annotate_4D(imp_flat2, rm, "") # manual annotate new position
 				elif(not skipannotated):
@@ -132,9 +127,7 @@ def processImage(image_path, output_dir):
 					
 
 				imp_flat2.close()
-
-							
-				# save selected points		
+				
 				
 				# If the file exist from before delete it before saving it again based on edits from user
 				if os.path.exists(outName):
@@ -144,7 +137,6 @@ def processImage(image_path, output_dir):
 				if(rm.getCount()>0):
 					rm.runCommand(imp,"Deselect");
 					rm.save(outName);
-					print("saved: " + outName)
 
 				# Delete all ROIs in ROI manager
 				if(rm.getCount()>0):
@@ -157,7 +149,6 @@ def processImage(image_path, output_dir):
 			rm.runCommand(imp,"Delete")
 
 def manual_annotate_4D(imp, rm, path):	
-	
 	if(rm.getCount() >0):
 		rm.runCommand(imp,"Delete")
 
@@ -189,10 +180,74 @@ def manual_annotate_4D(imp, rm, path):
 	# return ROI Manager
 	return rm
 
+def makeResultsTable(dstDir):
+	# Read all nucleus segmentation files
+	ext_search = dstDir + "\\*" + nuc_seg_ext + "*.zip"
+	
+	rm = RoiManager.getInstance()
+	rm.close()
+	IJ.run("ROI Manager...", "") # open a empty ROI manager
+	if(rm.getCount()>0):
+		rm.runCommand(imp,"Deselect");
+		rm.runCommand(imp,"Delete");
+	
+	# Make results table
+	rt_exist = WindowManager.getWindow("Results table")
+	if rt_exist==None or not isinstance(rt_exist, TextWindow):
+	    rt= ResultsTable()
+	else:
+	    rt = rt_exist.getTextPanel().getOrCreateResultsTable()
+	rt_counter = 0
+	
+	for f in glob.glob(ext_search):
+		IJ.run("ROI Manager...", "") # open a empty ROI manager
+		rm = RoiManager.getInstance()
+		rm.open(f)
+		nNuclei = rm.getCount() # used to count cells with zero points in
+		rm.close() # close roi manager so that it can be used for annotations
+
+		
+		nuc_ids = range(nNuclei) # search for zip filea with these IDs
+		for nucid in nuc_ids:
+			annotation_file_name = os.path.splitext(os.path.basename(str(f)))[0]
+			annotation_file_name_search =  dstDir + "\\" + annotation_file_name.replace(nuc_seg_ext, nucleus_annotation_ext) + str(nucid) + ".zip"		
+
+			rt.setValue("file_name", rt_counter, annotation_file_name);
+			rt.setValue("nucleus_id", rt_counter, nucid);			
 			
+			
+			if(os.path.exists(annotation_file_name_search)):
+				IJ.run("ROI Manager...", "") # open a empty ROI manager
+				rm = RoiManager.getInstance()
+				rm.open(annotation_file_name_search)							
+				
+				rt.setValue("annotation_count", rt_counter, rm.getCount());
+				rt.show("Results table")
+				rm.close()
+			else:
+				rt.setValue("annotation_count", rt_counter, 0); # Add zero cell if no zip file
+			
+			rt_counter = rt_counter + 1 
+			
+	# Save results table
+	rt.saveAs(dstDir + "\\" + "Results_annotations" + ".tsv")
+
+		
 # Run
 IJ.run("required imageJ version", "version=1.53k") # Auto-next slice was updated in 1.53k
-IJ.run("Close All", "");
+
+# input
+output_folder_ext = "_annotation"
+nuc_seg_ext = "_nuc_seg"
+nucleus_annotation_ext = "_nucleus_annotation_"
+
+# Run
+IJ.run("Close All", "")
 IJ.run("ROI Manager...", "") # Needs to be open before use
-run()
+run(output_folder_ext, nuc_seg_ext, nucleus_annotation_ext)
+
+IJ.run("Close All", "")
+
+
+# Make results table
 
