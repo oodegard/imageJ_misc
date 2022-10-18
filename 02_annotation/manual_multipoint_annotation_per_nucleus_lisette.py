@@ -53,6 +53,25 @@ def run(output_folder_ext, nuc_seg_ext, nucleus_annotation_ext):
 
 # This function will open one image and call manual_annotate_4D or editTrace as long as there are ROIs in the ROI manager
 # The function will save each ROI output_dir with the same file name + track ID + .zip  
+
+
+def find_nuclei(nuc):
+	rm = RoiManager.getRoiManager() # New ROI manager
+	
+	IJ.setAutoThreshold(nuc, "MaxEntropy dark");
+	IJ.run(nuc, "Convert to Mask", "MaxEntropy dark")
+	IJ.run(nuc, "Fill Holes", "");
+			
+	# Delete all ROIs in ROI manager
+	if(rm.getCount()>0):
+		rm.runCommand(imp,"Deselect")
+		rm.runCommand(imp,"Delete")
+						
+	# Find nuclei and add to manager
+	IJ.run(nuc, "Analyze Particles...", "size=" + str(minCellSize) + "-Infinity pixel exclude clear add");
+	#IJ.run(nuc, "Analyze Particles...", "size=" + minCellSize + "-Infinity exclude clear add");
+
+
 def processImage(image_path, output_dir):
 	print("Run analysis: " + image_path)
 	# Define output name
@@ -67,6 +86,7 @@ def processImage(image_path, output_dir):
 		IJ.run(imp, "8-bit", "")
 			
 		# Make/empty ROI manager
+		IJ.run("ROI Manager...", "") # open a empty ROI manager
 		rm = RoiManager.getInstance()
 		if(rm.getCount()>0):
 			rm.runCommand(imp,"Deselect");
@@ -76,27 +96,40 @@ def processImage(image_path, output_dir):
 		if(imp.getDimensions()[3]>1):
   			imp = ZProjector.run(imp,"max all")
 
-		segmentation_file_name = os.path.join(output_dir, outNameBase + nuc_seg_ext + ".zip")
+		#segmentation_file_name = os.path.join(output_dir, outNameBase + nuc_seg_ext + ".zip")
+		roi_zip_name = os.path.join(output_dir, outNameBase + nuc_seg_ext + ".zip")
+		roi_roi_name = os.path.join(output_dir, outNameBase + nuc_seg_ext + ".roi")
+		roi_txt_name = os.path.join(output_dir, outNameBase + nuc_seg_ext + ".txt")
+
+		if(os.path.exists(roi_zip_name)):
+			roi_path = roi_zip_name
+		elif(os.path.exists(roi_roi_name)):
+			roi_path = roi_roi_name
+		else:
+			roi_path = False
+		print(roi_path)
 		
-		if(not os.path.exists(segmentation_file_name)):
-			# Fin all nuclei
+		if(roi_path == False): # Make a new segmentation
+			# Fin all nuclei		
 			nuc = Duplicator().run(imp, nuc_ch, nuc_ch, 1, 1, 1, 1)
-			IJ.run(nuc, "Convert to Mask", "Intermodes dark")
-	
-			# Delete all ROIs in ROI manager
-			if(rm.getCount()>0):
-				rm.runCommand(imp,"Deselect")
-				rm.runCommand(imp,"Delete")
+			find_nuclei(nuc)
 			
-			# Find nuclei and add to manager
-			IJ.run(nuc, "Analyze Particles...", "size=100-Infinity exclude clear add");
+			# Add edit nuc segmentation
+			# code placeholder
 
 			# Save nucleus segmentation
-			rm.runCommand(imp,"Deselect");
-			rm.save(segmentation_file_name);
-
-		else:
-			rm.open(segmentation_file_name)
+			rm = RoiManager.getInstance()
+			
+			if(rm.getCount()>1):
+				rm.runCommand(nuc,"Deselect");
+				rm.save(roi_zip_name);
+			elif(rm.getCount()==1): # somehow I can not save a single roi in a zip folder
+				rm.select(0)
+				rm.save(roi_roi_name)
+			else: # save a txt file if no nucleus found
+				IJ.saveString("No nucleus found", roi_txt_name)	
+		else:		
+			rm.open(roi_path)
 		
 		imp.setDisplayMode(IJ.COMPOSITE);
 		imp.show() # To activate composite img
@@ -116,46 +149,59 @@ def processImage(image_path, output_dir):
 					rm.runCommand(imp,"Deselect")
 					rm.runCommand(imp,"Delete")
 				
-				# Let the user define new trace, or open existing trace 
-				outName = os.path.join(output_dir, outNameBase + nucleus_annotation_ext + str(i) + ".zip")	 
-				if(not os.path.exists(outName)):			
-					rm = manual_annotate_4D(imp_flat2, rm, "") # manual annotate new position
-				elif(not skipannotated):
-					rm = manual_annotate_4D(imp_flat2, rm, outName) # Open and edit existing annotation
-				else:
-					continue
+					# Let the user define new trace, or open existing trace 
+					annotation_zip_name = os.path.join(output_dir, outNameBase + nucleus_annotation_ext + str(i) + ".zip")
+					annotation_roi_name = os.path.join(output_dir, outNameBase + nucleus_annotation_ext + str(i) + ".roi")
+					annotation_txt_name = os.path.join(output_dir, outNameBase + nucleus_annotation_ext + str(i) + ".txt")
+	
+					# check if any roi file exist from before
+					if(os.path.exists(annotation_zip_name)):
+						annotation_name = annotation_zip_name
+					elif(os.path.exists(annotation_roi_name)):
+						annotation_name = annotation_roi_name
+					else:
+						annotation_name = False
+	
+					rm = RoiManager.getInstance()	
 					
+					if(annotation_name != False):
+						rm.open(annotation_name)
+					
+					# Manual annotation of cells
+					if(any([not skipannotated , annotation_name == False])):
+						rm = manual_annotate_4D(imp_flat2, rm)
 
+					
+					# If the file exist from before delete it before saving it again based on edits from user
+					if os.path.exists(annotation_zip_name):
+						os.remove(annotation_zip_name)
+					if os.path.exists(annotation_roi_name):
+						os.remove(annotation_roi_name)
+					if os.path.exists(annotation_txt_name):
+						os.remove(annotation_txt_name)	
+								
+					# Save
+					if(rm.getCount()>1):
+						rm.runCommand(imp_flat2,"Deselect");
+						rm.save(annotation_zip_name);
+					elif(rm.getCount()==1): # somehow I can not save a single roi in a zip folder
+						rm.select(0)
+						rm.save(annotation_roi_name)
+					else: # save a txt file if no nucleus found
+						IJ.saveString("No nucleus found", annotation_txt_name)	
+					
+					# Delete all ROIs in ROI manager
+					rm = RoiManager.getInstance()
+					if(rm.getCount()>0):
+						rm.runCommand(imp_flat2,"Deselect")
+						rm.runCommand(imp_flat2,"Delete")
+					
 				imp_flat2.close()
-				
-				
-				# If the file exist from before delete it before saving it again based on edits from user
-				if os.path.exists(outName):
-					os.remove(outName)
-				
-				# Save
-				if(rm.getCount()>0):
-					rm.runCommand(imp,"Deselect");
-					rm.save(outName);
+				rm.open(roi_path); # re open the nuclear segmentation ROI
+		
 
-				# Delete all ROIs in ROI manager
-				if(rm.getCount()>0):
-					rm.runCommand(imp,"Deselect")
-					rm.runCommand(imp,"Delete")
-				
-				rm.open(segmentation_file_name);
-		if(rm.getCount()>0):
-			rm.runCommand(imp,"Deselect")
-			rm.runCommand(imp,"Delete")
+def manual_annotate_4D(imp, rm):
 
-def manual_annotate_4D(imp, rm, path):	
-	if(rm.getCount() >0):
-		rm.runCommand(imp,"Delete")
-
-	# Open ROI from file
-	if(path != ""):
-		rm.runCommand("open", path)
-		rm.select(0)
 	IJ.run(imp, "Select None", "");
 	
 	# ROI manager setup
@@ -182,15 +228,13 @@ def manual_annotate_4D(imp, rm, path):
 
 def makeResultsTable(dstDir):
 	# Read all nucleus segmentation files
-	ext_search = dstDir + "\\*" + nuc_seg_ext + "*.zip"
+	ext_search_zip = glob.glob(dstDir + "\\*" + nuc_seg_ext + "*.zip")
+	ext_search_roi = glob.glob(dstDir + "\\*" + nuc_seg_ext + "*.roi")
+	ext_search = ext_search_zip + ext_search_roi
 	
 	rm = RoiManager.getInstance()
 	rm.close()
-	IJ.run("ROI Manager...", "") # open a empty ROI manager
-	if(rm.getCount()>0):
-		rm.runCommand(imp,"Deselect");
-		rm.runCommand(imp,"Delete");
-	
+			
 	# Make results table
 	rt_exist = WindowManager.getWindow("Results table")
 	if rt_exist==None or not isinstance(rt_exist, TextWindow):
@@ -198,8 +242,9 @@ def makeResultsTable(dstDir):
 	else:
 	    rt = rt_exist.getTextPanel().getOrCreateResultsTable()
 	rt_counter = 0
+
 	
-	for f in glob.glob(ext_search):
+	for f in ext_search:
 		IJ.run("ROI Manager...", "") # open a empty ROI manager
 		rm = RoiManager.getInstance()
 		rm.open(f)
@@ -240,10 +285,12 @@ IJ.run("required imageJ version", "version=1.53k") # Auto-next slice was updated
 output_folder_ext = "_annotation"
 nuc_seg_ext = "_nuc_seg"
 nucleus_annotation_ext = "_nucleus_annotation_"
+minCellSize = 10
+
 
 # Run
 IJ.run("Close All", "")
-IJ.run("ROI Manager...", "") # Needs to be open before use
+
 run(output_folder_ext, nuc_seg_ext, nucleus_annotation_ext)
 
 IJ.run("Close All", "")
