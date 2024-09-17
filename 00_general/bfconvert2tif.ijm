@@ -4,7 +4,7 @@
 
 #@ File (label = "Input directory", style = "directory") input
 #@ File (label = "Output directory", style = "directory") output
-#@ String (label = "File suffix", value = ".tif") suffix
+#@ String (label = "File suffix", value = ".ims") suffix
 // boolean (label = "First series only") firstOnly
 
 firstOnly = true;
