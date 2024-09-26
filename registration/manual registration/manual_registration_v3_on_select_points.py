@@ -164,6 +164,13 @@ SwingUtilities.invokeLater(ShowDialogRunnable())
 # Wait for the dialog to be closed
 dialog_done_event.wait()  # Wait here until the dialog sets the event
 
+padded_reference_image.hide()
+padded_align_image.hide()
+
 # Continue with the rest of your processing
 combined_stack = RGBStackMerge.mergeChannels([padded_reference_image, padded_align_image], True)
 combined_stack.show()
+
+
+
+

@@ -93,9 +93,12 @@ def get_window_position(image):
 reference_image = WindowManager.getImage(padded_reference_image.getTitle())
 align_image = WindowManager.getImage(padded_align_image.getTitle())
 
+
 # Inform the user to manually align images using WaitForUserDialog
 wait_dialog = WaitForUserDialog("Manual Alignment", "Please manually align the image windows by dragging them. Click OK when done.")
 wait_dialog.show()
+
+IJ.run("Tile", "")
 
 # Get their positions after manual alignment
 pos_ref = get_window_position(reference_image)
