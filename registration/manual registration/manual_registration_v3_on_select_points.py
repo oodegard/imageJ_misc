@@ -1,22 +1,87 @@
 #@ File(label="Reference Image", style="file") reference_image_file
 #@ File(label="Image to Align", style="file") align_image_file
+
 from ij import IJ, WindowManager
 from ij.plugin import RGBStackMerge
 from ij.process import ColorProcessor
 from loci.plugins import BF
 from loci.plugins.in import ImporterOptions
-from ij.gui import WaitForUserDialog, GenericDialog
-from ij.plugin.frame import RoiManager
-from ij.gui import PointRoi
-from ij.process import FloatPolygon
 import os
+import threading
+from javax.swing import JFrame, JButton, JLabel, BoxLayout, SwingUtilities
+from java.lang import Runnable
 
-from ij import IJ, WindowManager
-from ij.plugin.frame import RoiManager
-from javax.swing import JFrame, JPanel, JButton, JLabel, BoxLayout, SwingUtilities
-from java.awt.event import ActionListener
-
+# Ensure all windows closed before starting
 IJ.run("Close All", "")
+
+# Create an event object to wait until the dialog is done
+dialog_done_event = threading.Event()
+
+class FlipImagesDialog(JFrame):
+    def __init__(self):
+        super(FlipImagesDialog, self).__init__("Flip Images")
+        self.initUI()
+
+    def initUI(self):
+        self.setLayout(BoxLayout(self.getContentPane(), BoxLayout.Y_AXIS))
+
+        self.label = JLabel("Flip vertically and horizontally until correct then click OK.")
+        self.add(self.label)
+
+        self.flipVertButton = JButton("Flip Vertically")
+        self.flipHorzButton = JButton("Flip Horizontally")
+        self.okButton = JButton("OK")
+
+        self.flipVertButton.addActionListener(self.flipVertically)
+        self.flipHorzButton.addActionListener(self.flipHorizontally)
+        self.okButton.addActionListener(self.closeDialog)
+
+        self.add(self.flipVertButton)
+        self.add(self.flipHorzButton)
+        self.add(self.okButton)
+
+        self.setSize(300, 150)
+        self.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE)
+
+    def flipVertically(self, event):
+        imp = WindowManager.getCurrentImage()
+        if imp is not None:
+            IJ.run(imp, "Flip Vertically", "")
+
+    def flipHorizontally(self, event):
+        imp = WindowManager.getCurrentImage()
+        if imp is not None:
+            IJ.run(imp, "Flip Horizontally", "")
+
+    def closeDialog(self, event):
+        # Hide the images before closing
+        imp1 = WindowManager.getImage("reference_image_title")
+        imp2 = WindowManager.getImage("align_image_title")
+        if imp1 is not None:
+            imp1.hide()
+        if imp2 is not None:
+            imp2.hide()
+        self.dispose()
+        dialog_done_event.set()  # Signal that the dialog is closed
+
+class ShowDialogRunnable(Runnable):
+    def run(self):
+        prepareImages()  # Set titles and show images
+        dialog = FlipImagesDialog()  # Instantiate the dialog
+        dialog.setVisible(True)  # Ensure the dialog is visible
+
+def prepareImages():
+    ids = WindowManager.getIDList()
+    if ids is not None and len(ids) >= 2:
+        imp1 = WindowManager.getImage(ids[0])
+        imp2 = WindowManager.getImage(ids[1])
+        imp1.setTitle("reference_image_title")
+        imp2.setTitle("align_image_title")
+        imp1.show()
+        imp2.show()
+        IJ.run("Tile", "")
+    else:
+        print("Two images need to be open.")
 
 def pad_image(image, width_pad, height_pad, bitdepth, pad_color=0):
     ip = image.getProcessor()
@@ -24,13 +89,13 @@ def pad_image(image, width_pad, height_pad, bitdepth, pad_color=0):
     height = ip.getHeight() + abs(height_pad)
     canvas = IJ.createImage("Temp", "{} black".format(bitdepth), width, height, 1)
     canvas_ip = canvas.getProcessor()
-    
+
     # Insert the original image at the proper place to apply offset
     x_insert = max(0, width_pad)
     y_insert = max(0, height_pad)
     canvas_ip.insert(ip, x_insert, y_insert)
     canvas.setProcessor(canvas_ip)
-    
+
     return canvas
 
 def open_image_with_bioformats(path):
@@ -92,10 +157,13 @@ else:
 # Ask the user to flip the images
 padded_reference_image.show()
 padded_align_image.show()
-IJ.run("Tile", "");
 
-#TODO Add flip image functionality
+# Run the ShowDialogRunnable on the Swing event dispatch thread
+SwingUtilities.invokeLater(ShowDialogRunnable())
 
+# Wait for the dialog to be closed
+dialog_done_event.wait()  # Wait here until the dialog sets the event
 
-
-
+# Continue with the rest of your processing
+combined_stack = RGBStackMerge.mergeChannels([padded_reference_image, padded_align_image], True)
+combined_stack.show()
