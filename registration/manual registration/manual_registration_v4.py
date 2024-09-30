@@ -1,9 +1,9 @@
 import napari
 from napari.qt import thread_worker
 import numpy as np
-from skimage.io import imread
-from PIL import Image, TiffImagePlugin
+from PIL import Image
 from qtpy.QtWidgets import QFileDialog, QPushButton, QVBoxLayout, QWidget
+from scipy.ndimage import affine_transform
 
 
 # Define paths to images
@@ -14,7 +14,7 @@ align_image_path = r"C:\Users\Øyvind\OneDrive - Universitetet i Oslo\Work\03_Ui
 reference_image = np.array(Image.open(reference_image_path).convert('F'))
 align_image = np.array(Image.open(align_image_path).convert('F'))
 
-# Pad images if they aren't the same size
+# Pad images to the size of the largest image
 def pad_image(image, target_shape):
     padded_image = np.zeros(target_shape, dtype=image.dtype)
     padded_image[:image.shape[0], :image.shape[1]] = image
@@ -23,11 +23,8 @@ def pad_image(image, target_shape):
 final_shape = (max(reference_image.shape[0], align_image.shape[0]),
                max(reference_image.shape[1], align_image.shape[1]))
 
-if reference_image.shape != final_shape:
-    reference_image = pad_image(reference_image, final_shape)
-
-if align_image.shape != final_shape:
-    align_image = pad_image(align_image, final_shape)
+reference_image_padded = pad_image(reference_image, final_shape)
+align_image_padded = pad_image(align_image, final_shape)
 
 # Functions to flip images individually
 def flip_horizontally(layer):
@@ -38,14 +35,29 @@ def flip_vertically(layer):
 
 # Function to save images as a composite TIFF
 def save_composite_image(ref_layer, align_layer):
+    # Gather current transformations from Napari
+    ref_transform = ref_layer.affine.affine_matrix
+    align_transform = align_layer.affine.affine_matrix
+
+    # Remove translation part by extracting the rotation and scaling part of the affine matrix (top left 2x2)
+    ref_rotation_scaling = ref_transform[:2, :2]
+    ref_translation = ref_transform[:2, 2]
+    
+    align_rotation_scaling = align_transform[:2, :2]
+    align_translation = align_transform[:2, 2]
+    
+    # Apply transformations
+    ref_transformed_image = affine_transform(ref_layer.data, ref_rotation_scaling, offset=ref_translation)
+    align_transformed_image = affine_transform(align_layer.data, align_rotation_scaling, offset=align_translation)
+
     # Open a file dialog to select save path
     dialog = QFileDialog()
     dialog.setDefaultSuffix("tif")
     save_path, _ = dialog.getSaveFileName(None, "Save Composite Image", "", "TIFF files (*.tif)")
 
     if save_path:
-        ref_data = ref_layer.data.astype(np.uint8)  # Ensure data type is uint8 for Pillow compatibility
-        align_data = align_layer.data.astype(np.uint8)
+        ref_data = ref_transformed_image.astype(np.uint8)  # Ensure data type is uint8 for Pillow compatibility
+        align_data = align_transformed_image.astype(np.uint8)
 
         ref_image = Image.fromarray(ref_data)
         align_image = Image.fromarray(align_data)
@@ -58,8 +70,8 @@ def save_composite_image(ref_layer, align_layer):
 
 # Initialize viewer
 viewer = napari.Viewer()
-reference_layer = viewer.add_image(reference_image, name='reference_image')
-align_layer = viewer.add_image(align_image, name='align_image', colormap='red', blending='additive')
+reference_layer = viewer.add_image(reference_image_padded, name='reference_image')
+align_layer = viewer.add_image(align_image_padded, name='align_image', colormap='red', blending='additive')
 
 # Adding buttons with event handlers
 def add_buttons(viewer):
